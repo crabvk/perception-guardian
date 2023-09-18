@@ -20,6 +20,35 @@ There're no defaults, all config settings are mandatory.
 
 Use `/settings` command to change bot settings for a group.
 
+## Webhook setup with Nginx
+
+```nginx
+http {
+    upstream guardian {
+        server WEBHOOK_ADDR fail_timeout=0;
+    }
+
+    server {
+        # ...
+
+        location /webhook {
+            set $token SECRET_TOKEN;
+
+            if ($http_x_telegram_bot_api_secret_token = $token) {
+                proxy_pass http://guardian$request_uri;
+            }
+        }
+
+        location / {
+            return 403;
+        }
+    }
+}
+```
+
+where `WEBHOOK_ADDR` is the same address:port as in `telegram.webhook_addr` config option,
+and `SECRET_TOKEN` is your bot's token with ":" replaced to "_".
+
 ## TODO
 
 * Limit number of new chat members per minute, don't show captcha if limit has reached.

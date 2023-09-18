@@ -83,8 +83,9 @@ async fn main() {
     if let Some(ref host) = config.telegram.webhook_host {
         log::info!("Receiving updates via webhook on {}", host);
         let addr = config.telegram.webhook_addr.unwrap();
-        let url = format!("https://{host}/bot{token}/").parse().unwrap();
-        let listener = webhooks::axum(bot.clone(), webhooks::Options::new(addr, url))
+        let url = format!("https://{host}/webhook").parse().unwrap();
+        let opts = webhooks::Options::new(addr, url).secret_token(token.replace(":", "_"));
+        let listener = webhooks::axum(bot.clone(), opts)
             .await
             .expect("Couldn't setup webhook");
         build_dispatcher(bot, schema(), listener, config).await;
