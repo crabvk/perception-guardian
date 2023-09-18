@@ -1,0 +1,33 @@
+[package]
+name = "perception-guardian"
+version = "0.1.0"
+edition = "2021"
+description = "Telegram bot with image-emoji CAPTCHA challenge-response."
+license = "MIT"
+homepage = "https://github.com/crabvk/perception-guardian"
+repository = "https://github.com/crabvk/perception-guardian"
+readme = "README.md"
+keywords = ["captcha", "telegram", "bot"]
+authors = ["Vyacheslav Konovalov <crabvk@protonmail.com>"]
+
+[dependencies]
+teloxide = { version = "0.12", features = ["macros", "webhooks-axum"] }
+log = "0.4"
+pretty_env_logger = "0.5"
+tokio = { version =  "1.32", features = ["rt-multi-thread", "macros"] }
+futures = "0.3"
+config = { version = "0.13", features = ["toml"] }
+serde = { version = "1.0", features = ["derive"] }
+dptree = "0.3.0"
+url = "2.4"
+rand = "0.8"
+reqwest = { version = "0.11", features = ["json"] }
+serde_json = "1.0"
+redis = { version = "0.23", features = ["tokio-comp", "connection-manager"] }
+sqlx = { version = "0.7", features = ["runtime-tokio", "tls-rustls", "sqlite"] }
+
+# FIXME: Wait for the next release of fluent-bundle where
+#        [`concurrent` module](https://bit.ly/3LlNqJ1) is public.
+fluent-bundle = { git = "https://github.com/projectfluent/fluent-rs.git" }
+
+strfmt = "0.2"
