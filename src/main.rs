@@ -110,8 +110,8 @@ async fn build_dispatcher<UListener>(
             InMemStorage::<SettingsState>::new(),
             Arc::new(config)
         ])
-        .default_handler(|upd| async move {
-            log::warn!("Unhandled update: {:?}", upd);
+        .default_handler(|_upd| async {
+            // log::warn!("Unhandled update: {:?}", upd);
         })
         .error_handler(LoggingErrorHandler::with_custom_text(
             "An error has occurred in the dispatcher",
