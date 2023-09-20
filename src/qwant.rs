@@ -47,5 +47,5 @@ pub async fn get_image_url(query: &str) -> Result<Url, crate::Error> {
         }
     }
 
-    Err(Box::new(QwantResponseError))
+    Err(QwantResponseError.into())
 }

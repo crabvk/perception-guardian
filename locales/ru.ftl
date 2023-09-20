@@ -43,4 +43,4 @@ settings-input-welcome-message = Введите новое приветстве�
 settings-value-set = <b>{ $name }</b> установлена: { $value }
 settings-text-required = Требуется ввести текст.
 settings-cancel = Редактирование настройки отменено.
-settings-message-too-old = Сообщение устарело.
+settings-message-outdated = Сообщение устарело.

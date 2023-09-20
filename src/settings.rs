@@ -34,8 +34,6 @@ pub enum ParseSettingError {
     UnknownLanguage(String),
     BoolError(String),
     UserTagNotPresent,
-    #[allow(dead_code)]
-    DisallowedHtmlEntity(String),
 }
 
 impl fmt::Display for ParseSettingError {
@@ -45,7 +43,6 @@ impl fmt::Display for ParseSettingError {
             SE::UnknownLanguage(lang) => write!(f, "unknown language string \"{lang}\""),
             SE::BoolError(str) => write!(f, "`true` or `false` expected, got \"{str}\""),
             SE::UserTagNotPresent => write!(f, "string must containt \"{{user_tag}}\" substring"),
-            SE::DisallowedHtmlEntity(_error) => todo!(),
         }
     }
 }

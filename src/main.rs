@@ -351,7 +351,7 @@ async fn select_setting_value_handler(
     let message = query.message;
 
     if message.is_none() || message_id != message.as_ref().unwrap().id {
-        let text = t!("settings-message-too-old", lang);
+        let text = t!("settings-message-outdated", lang);
         bot.answer_callback_query(query.id).text(text).await?;
         return Ok(());
     }
@@ -409,7 +409,7 @@ async fn select_setting_kind_handler(
     let message = query.message;
 
     if message.is_none() || message_id != message.as_ref().unwrap().id {
-        let text = t!("settings-message-too-old", lang);
+        let text = t!("settings-message-outdated", lang);
         bot.answer_callback_query(query.id).text(text).await?;
         return Ok(());
     }

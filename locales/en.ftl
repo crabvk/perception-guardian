@@ -40,4 +40,4 @@ settings-input-welcome-message = Enter new welcome message:
 settings-value-set = <b>{ $name }</b> is set: { $value }
 settings-text-required = Send me some text.
 settings-cancel = Setting editing is canceled.
-settings-message-too-old = The message is outdated.
+settings-message-outdated = The message is outdated.
