@@ -3,19 +3,19 @@
 duration-hours = { $value ->
     [one] { $value } час
     [few] { $value} часа
-    *[many] { $value } часов
+   *[many] { $value } часов
 }
 
 duration-minutes = { $value ->
     [one] { $value } минута
     [few] { $value} минуты
-    *[many] { $value } минут
+   *[many] { $value } минут
 }
 
 duration-seconds = { $value ->
     [one] { $value } секунда
     [few] { $value} секунды
-    *[many] { $value } секунд
+   *[many] { $value } секунд
 }
 
 ## Bot reply messages.
@@ -36,11 +36,27 @@ welcome = { $user_tag } Добро пожаловать!
 ## Settings related messages.
 
 settings-select-kind = Выберите настройку для изменения:
-settings-select-value = Текущее значение <b>{ $name }</b>: { $value }
-    Выберите новое значение:
+settings-select-language = Сейчас я использую русский.
+    Выберите новый язык:
+settings-select-language-default = Сейчас язык не установлен и я использую английский по-умолчанию.
+    Выберите новый язык:
+settings-select-ban-channels-all = Сейчас я блокирую все каналы.
+    Выберите, блокировать ли каналы:
+settings-select-ban-channels-linked = Сейчас я блокирую все каналы за исключением привязанного ({ $linked_chat_id }).
+    Выберите, блокировать ли каналы:
+settings-select-ban-channels-none = Сейчас я не блокирую каналы.
+    Выберите, блокировать ли каналы:
+settings-language-set = Язык изменён на { $lang ->
+        [ru] русский
+       *[en] английский
+    }.
+settings-ban-channels-set = Теперь я буду блокировать все каналы.
+settings-ban-channels-linked-set = Теперь я буду блокировать все каналы за исключением привязанного ({ $linked_chat_id }).
+settings-ban-channels-none-set = Теперь я не буду блокировать каналы.
+settings-welcome-message-set = Теперь я буду использовать новое приветственное сообщение:
+    { $welcome_message }
 settings-input-welcome-message = Введите новое приветственное сообщение:
-    (Список доступных HTML тегов указан <a href="https://core.telegram.org/api/entities#allowed-entities">здесь</a>)
-settings-value-set = <b>{ $name }</b> установлена: { $value }
+    (<a href="https://core.telegram.org/api/entities#allowed-entities">Список доступных HTML тегов</a>)
 settings-text-required = Требуется ввести текст.
 settings-cancel = Редактирование настройки отменено.
 settings-message-outdated = Сообщение устарело.

@@ -2,17 +2,17 @@
 
 duration-hours = { $value ->
     [one] { $value } hour
-    *[many] { $value } hours
+   *[many] { $value } hours
 }
 
 duration-minutes = { $value ->
     [one] { $value } minute
-    *[many] { $value } minutes
+   *[many] { $value } minutes
 }
 
 duration-seconds = { $value ->
     [one] { $value } second
-    *[many] { $value } seconds
+   *[many] { $value } seconds
 }
 
 ## Bot reply messages.
@@ -33,11 +33,27 @@ welcome = { $user_tag } Welcome!
 ## Settings related messages.
 
 settings-select-kind = Choose setting to change:
-settings-select-value = Current <b>{ $name }</b> value: { $value }
-    Choose new value:
+settings-select-language = Currently, I'm using English.
+    Choose new language:
+settings-select-language-default = Currently, language is not set and I'm using English as default.
+    Choose new language:
+settings-select-ban-channels-all = Currently, I'm banning all channels.
+    Choose whether to ban channels:
+settings-select-ban-channels-linked = Currently, I'm banning all channels except the linked one ({ $linked_chat_id }).
+    Choose whether to ban channels:
+settings-select-ban-channels-none = Currently, I'm not banning channels.
+    Choose whether to ban channels:
+settings-language-set = Language changed to { $lang ->
+        [ru] Russian
+       *[en] English
+    }.
+settings-ban-channels-set = Now I'll ban all channels.
+settings-ban-channels-linked-set = Now I'll ban all channels except for the linked one ({ $linked_chat_id }).
+settings-ban-channels-none-set = Now I won't ban any channels.
+settings-welcome-message-set = Now I'll use new welcome message:
+    { $welcome_message }
 settings-input-welcome-message = Enter new welcome message:
-    (List of allowed HTML entities can be found <a href="https://core.telegram.org/api/entities#allowed-entities">here</a>)
-settings-value-set = <b>{ $name }</b> is set: { $value }
+    (<a href="https://core.telegram.org/api/entities#allowed-entities">List of allowed HTML tags</a>)
 settings-text-required = Send me some text.
 settings-cancel = Setting editing is canceled.
 settings-message-outdated = The message is outdated.

@@ -3,22 +3,35 @@ mod l10n;
 mod qna;
 mod qwant;
 mod redis;
+mod responses;
 mod settings;
 mod utils;
 
 use crate::config::Config;
-use crate::settings::{Setting, SettingKind};
+use crate::responses::{BanChannelsResponse, LanguageResponse, WelcomeMessageResponse};
+use crate::settings::{BanChannels, Setting, SettingKind};
 use std::{collections::HashMap, future::IntoFuture, sync::Arc, time::Duration};
 use strfmt::strfmt;
 use teloxide::{
     adaptors::DefaultParseMode,
     dispatching::{dialogue, dialogue::InMemStorage, UpdateHandler},
     prelude::*,
-    types::{ChatPermissions, InputFile, Me, MessageId, ParseMode, Update, User, UserId},
+    types::{
+        ChatKind, ChatPermissions, ChatPublic, InputFile, Me, MessageId, ParseMode, PublicChatKind,
+        PublicChatSupergroup, Update, User, UserId,
+    },
     update_listeners::UpdateListener,
     update_listeners::{polling_default, webhooks},
     utils::{command::BotCommands, html},
 };
+
+const SETTINGS_BUTTONS: [(&str, &str); 3] = [
+    ("Language", "0"),
+    ("Ban channels", "1"),
+    ("Welcome message", "2"),
+];
+const LANGUAGES_BUTTONS: [(&str, &str); 2] = [("🇬🇧", "en"), ("🇷🇺", "ru")];
+const BAN_CHANNELS_BUTTONS: [(&str, &str); 2] = [("Yes", "true"), ("No", "false")];
 
 type Bot = DefaultParseMode<teloxide::prelude::Bot>;
 type SettingsDialogue = Dialogue<SettingsState, InMemStorage<SettingsState>>;
@@ -111,7 +124,7 @@ async fn build_dispatcher<UListener>(
             InMemStorage::<SettingsState>::new(),
             Arc::new(config)
         ])
-        .default_handler(|_upd| async {
+        .default_handler(|_upd| async move {
             // log::warn!("Unhandled update: {:?}", upd);
         })
         .error_handler(LoggingErrorHandler::with_custom_text(
@@ -200,24 +213,30 @@ async fn is_user_privileged(bot: Bot, upd: Update) -> bool {
     false
 }
 
-fn format_setting(setting: Option<Setting>) -> String {
-    if let Some(setting) = setting {
-        setting.value()
-    } else {
-        "None".to_owned()
-    }
-}
-
 async fn channel_message_handler(bot: Bot, msg: Message) -> HandlerResult {
     let chat_id = msg.chat.id;
-    if let Some(Setting::BanChannels(true)) = settings::get(chat_id, SettingKind::BanChannels) {
-        if let Some(sender_chat) = msg.sender_chat() {
-            let _ = tokio::join!(
-                bot.ban_chat_sender_chat(chat_id, sender_chat.id)
-                    .into_future(),
-                bot.delete_message(chat_id, msg.id).into_future()
-            );
-        }
+    let ban_channels = settings::get(chat_id, SettingKind::BanChannels);
+
+    if ban_channels.is_none() {
+        return Ok(());
+    }
+
+    // `sender_chat()` is `Some(_)` because of `is_channel_message` filter in `schema()`.
+    let sender_chat = msg.sender_chat().unwrap();
+    let linked_chat_id = if let Setting::BanChannels(BanChannels::AllExceptLinked(linked_chat_id)) =
+        ban_channels.unwrap()
+    {
+        linked_chat_id
+    } else {
+        0
+    };
+
+    if linked_chat_id != sender_chat.id.0 {
+        let _ = tokio::join!(
+            bot.ban_chat_sender_chat(chat_id, sender_chat.id)
+                .into_future(),
+            bot.delete_message(chat_id, msg.id).into_future()
+        );
     }
 
     Ok(())
@@ -227,7 +246,6 @@ async fn cancel_handler(
     cfg: Arc<Config>,
     bot: Bot,
     msg: Message,
-    upd: Update,
     dialogue: SettingsDialogue,
 ) -> HandlerResult {
     let state = dialogue.get().await?;
@@ -253,7 +271,7 @@ async fn cancel_handler(
         },
     ) = state
     {
-        if user_id == upd.user().unwrap().id {
+        if user_id == msg.from().unwrap().id {
             let chat_id = msg.chat.id;
             let lang = settings::lang(chat_id);
             let text = t!("settings-cancel", lang);
@@ -283,10 +301,9 @@ async fn input_setting_value_handler(
     bot: Bot,
     msg: Message,
     dialogue: SettingsDialogue,
-    upd: Update,
-    (user_id, _, setting_kind): (UserId, MessageId, SettingKind),
+    (user_id, _, _): (UserId, MessageId, SettingKind),
 ) -> HandlerResult {
-    if user_id != upd.user().unwrap().id {
+    if user_id != msg.from().unwrap().id {
         return Ok(());
     }
 
@@ -300,21 +317,23 @@ async fn input_setting_value_handler(
         return Ok(());
     }
 
-    let setting = Setting::parse(setting_kind, text.unwrap());
-    let setting_name = format!("{setting_kind:?}");
-    if let Err(error) = setting {
-        let text = format!("Error while parsing <b>{setting_name}</b> value: {error}");
+    let response: Result<WelcomeMessageResponse, _> = text.unwrap().parse();
+
+    if let Err(error) = response {
+        let text = format!("Couldn't parse <b>WelcomeMessage</b> value: {error}");
         bot.send_message(chat_id, text).await?;
         return Ok(());
     }
 
-    let setting = setting.unwrap();
+    let welcome_message = response.unwrap().0;
     let text = t!(
-        "settings-value-set",
+        "settings-welcome-message-set",
         lang,
-        name = setting_name,
-        value = setting.value()
+        welcome_message = &welcome_message
     );
+    let setting = Setting::WelcomeMessage(welcome_message);
+
+    // Send welcome message back to check its validity.
     match bot.send_message(chat_id, text).await {
         Ok(message) => {
             settings::set(chat_id, setting).await?;
@@ -362,34 +381,82 @@ async fn select_setting_value_handler(
         return Ok(());
     }
 
-    let value = query.data.unwrap();
     bot.answer_callback_query(query.id).await?;
-    bot.delete_message(chat_id, message.unwrap().id).await?;
-    let setting = Setting::parse(setting_kind, &value);
+    let value = query.data.unwrap();
 
-    if let Err(error) = setting {
-        let text = format!("Couldn't parse setting value: {error}");
-        bot.send_message(chat_id, text).await?;
-        return Ok(());
+    let send_message = match setting_kind {
+        SettingKind::Language => {
+            let response: Result<LanguageResponse, _> = value.parse();
+
+            if let Err(error) = response {
+                let text = format!("Couldn't parse <b>Language</b> value: {error}");
+                bot.send_message(chat_id, text).await?;
+                return Ok(());
+            }
+
+            let lang = response.unwrap().0;
+            let setting = Setting::Language(lang);
+            settings::set(chat_id, setting).await?;
+            let text = t!("settings-language-set", lang, lang);
+            bot.send_message(chat_id, text)
+        }
+        SettingKind::BanChannels => {
+            let response: Result<BanChannelsResponse, _> = value.parse();
+
+            if let Err(error) = response {
+                let text = format!("Couldn't parse <b>BanChannels</b> value: {error}");
+                bot.send_message(chat_id, text).await?;
+                return Ok(());
+            }
+
+            if response.unwrap().0 {
+                let chat = bot.get_chat(chat_id).await?;
+
+                if let ChatKind::Public(ChatPublic {
+                    kind:
+                        PublicChatKind::Supergroup(PublicChatSupergroup {
+                            linked_chat_id: Some(linked_chat_id),
+                            ..
+                        }),
+                    ..
+                }) = chat.kind
+                {
+                    let setting =
+                        Setting::BanChannels(BanChannels::AllExceptLinked(linked_chat_id));
+                    settings::set(chat_id, setting).await?;
+                    let text = t!("settings-ban-channels-linked-set", lang, linked_chat_id);
+                    bot.send_message(chat_id, text)
+                } else {
+                    let setting = Setting::BanChannels(BanChannels::All);
+                    settings::set(chat_id, setting).await?;
+                    let text = t!("settings-ban-channels-set", lang);
+                    bot.send_message(chat_id, text)
+                }
+            } else {
+                let ban_channels = settings::get(chat_id, SettingKind::BanChannels);
+                if ban_channels.is_some() {
+                    settings::delete(chat_id, SettingKind::BanChannels).await?;
+                }
+                let text = t!("settings-ban-channels-none-set", lang);
+                bot.send_message(chat_id, text)
+            }
+        }
+        _ => unreachable!(),
+    };
+
+    let (message, _) = tokio::join!(
+        send_message.into_future(),
+        bot.delete_message(chat_id, message_id).into_future()
+    );
+    if let Ok(message) = message {
+        let _ = utils::delete_message_later(
+            &bot,
+            chat_id,
+            message.id,
+            Duration::from_secs(cfg.guardian.message_expire),
+        );
     }
-
-    let setting = setting.unwrap();
-    let text = t!(
-        "settings-value-set",
-        lang,
-        name = format!("{setting_kind:?}"),
-        value = setting.value()
-    );
-    settings::set(chat_id, setting).await?;
-    let message = bot.send_message(chat_id, text).await?;
-    let _ = utils::delete_message_later(
-        &bot,
-        chat_id,
-        message.id,
-        Duration::from_secs(cfg.guardian.message_expire),
-    );
     dialogue.exit().await?;
-
     Ok(())
 }
 
@@ -435,16 +502,27 @@ async fn select_setting_kind_handler(
     match setting_kind {
         SettingKind::Language | SettingKind::BanChannels => {
             let setting = settings::get(chat_id, setting_kind);
-            let text = t!(
-                "settings-select-value",
-                lang,
-                name = format!("{setting_kind:?}"),
-                value = format_setting(setting)
-            );
-            let keyboard = if setting_kind == SettingKind::Language {
-                utils::keyboard(&Setting::LANGUAGES_VARIANTS, 2)
+            let (keyboard, text) = if setting_kind == SettingKind::Language {
+                let text = if let Some(Setting::Language(lang)) = setting {
+                    t!("settings-select-language", lang)
+                } else {
+                    t!("settings-select-language-default", lang)
+                };
+                (utils::keyboard(&LANGUAGES_BUTTONS, 2), text)
+            } else if setting_kind == SettingKind::BanChannels {
+                let text = match setting {
+                    Some(Setting::BanChannels(BanChannels::All)) => {
+                        t!("settings-select-ban-channels-all", lang)
+                    }
+                    Some(Setting::BanChannels(BanChannels::AllExceptLinked(linked_chat_id))) => {
+                        t!("settings-select-ban-channels-linked", lang, linked_chat_id)
+                    }
+                    None => t!("settings-select-ban-channels-none", lang),
+                    _ => unreachable!(),
+                };
+                (utils::keyboard(&BAN_CHANNELS_BUTTONS, 2), text)
             } else {
-                utils::keyboard(&Setting::BAN_CHANNELS_VARIANTS, 2)
+                unreachable!()
             };
             let message = bot
                 .send_message(chat_id, text)
@@ -480,13 +558,12 @@ async fn select_setting_kind_handler(
 async fn settings_command_handler(
     bot: Bot,
     msg: Message,
-    upd: Update,
     dialogue: SettingsDialogue,
 ) -> HandlerResult {
     let chat_id = msg.chat.id;
     let lang = settings::lang(chat_id);
     let text = t!("settings-select-kind", lang);
-    let keyboard = utils::keyboard(&Setting::SETTINGS_VARIANTS, 2);
+    let keyboard = utils::keyboard(&SETTINGS_BUTTONS, 2);
     let message = bot
         .send_message(chat_id, text)
         .reply_markup(keyboard)
@@ -494,7 +571,7 @@ async fn settings_command_handler(
         .await?;
     dialogue
         .update(SettingsState::SelectSetting {
-            user_id: upd.user().unwrap().id,
+            user_id: msg.from().unwrap().id,
             message_id: message.id,
         })
         .await?;

@@ -1,7 +1,10 @@
 use crate::l10n::Language;
 use sqlx::{sqlite::SqlitePoolOptions, Pool, Sqlite};
 use std::sync::{Mutex, OnceLock};
-use std::{collections::HashMap, error, fmt, ops::Deref};
+use std::{
+    collections::HashMap, convert::TryFrom, error, fmt, num::ParseIntError, ops::Deref,
+    str::FromStr,
+};
 use teloxide::types::ChatId;
 use tokio::sync::OnceCell;
 
@@ -23,79 +26,96 @@ impl From<i64> for SettingKind {
         match value {
             0 => Language,
             1 => BanChannels,
-            _ => WelcomeMessage,
+            2 => WelcomeMessage,
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum BanChannels {
+    All,
+    AllExceptLinked(i64),
+}
+
+impl fmt::Display for BanChannels {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::All => write!(f, "0"),
+            Self::AllExceptLinked(chat_id) => write!(f, "{chat_id}"),
+        }
+    }
+}
+
+impl FromStr for BanChannels {
+    type Err = ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "0" => Ok(Self::All),
+            value => Ok(Self::AllExceptLinked(value.parse()?)),
         }
     }
 }
 
 // Represents all possible errors that can occur when parsing a setting.
 #[derive(Debug)]
-pub enum ParseSettingError {
+pub enum SettingError {
     UnknownLanguage(String),
-    BoolError(String),
-    UserTagNotPresent,
+    ParseIntError(String),
 }
 
-impl fmt::Display for ParseSettingError {
+impl fmt::Display for SettingError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use ParseSettingError as SE;
+        use SettingError as SE;
         match self {
             SE::UnknownLanguage(lang) => write!(f, "unknown language string \"{lang}\""),
-            SE::BoolError(str) => write!(f, "`true` or `false` expected, got \"{str}\""),
-            SE::UserTagNotPresent => write!(f, "string must containt \"{{user_tag}}\" substring"),
+            SE::ParseIntError(value) => write!(f, "failed conversion \"{value}\" to i64"),
         }
     }
 }
 
-impl error::Error for ParseSettingError {}
+impl error::Error for SettingError {}
 
 #[derive(Debug, Clone)]
 pub enum Setting {
     Language(Language),
-    BanChannels(bool),
+    BanChannels(BanChannels),
     WelcomeMessage(String),
 }
 
-impl Setting {
-    pub const SETTINGS_VARIANTS: [(&str, &str); 3] = [
-        ("Language", "0"),
-        ("Ban channels", "1"),
-        ("Welcome message", "2"),
-    ];
-    pub const LANGUAGES_VARIANTS: [(&str, &str); 2] = [("🇬🇧", "en"), ("🇷🇺", "ru")];
-    pub const BAN_CHANNELS_VARIANTS: [(&str, &str); 2] = [("Yes", "true"), ("No", "false")];
+impl TryFrom<(SettingKind, String)> for Setting {
+    type Error = SettingError;
 
-    pub fn value(&self) -> String {
-        match self {
-            Self::Language(lang) => lang.to_string(),
-            Self::BanChannels(val) => val.to_string(),
-            Self::WelcomeMessage(msg) => msg.to_string(),
-        }
-    }
-
-    pub fn parse(kind: SettingKind, value: &str) -> Result<Self, ParseSettingError> {
-        use SettingKind as SK;
+    fn try_from((kind, value): (SettingKind, String)) -> Result<Self, Self::Error> {
+        use SettingKind as Kind;
         match kind {
-            SK::Language => {
+            Kind::Language => {
                 let lang: Language = value.parse()?;
                 Ok(Self::Language(lang))
             }
-            SK::BanChannels => {
-                if let Ok(value) = value.parse() {
-                    Ok(Self::BanChannels(value))
-                } else {
-                    Err(ParseSettingError::BoolError(value.to_owned()))
-                }
+            Kind::BanChannels => {
+                let value = value
+                    .parse()
+                    .map_err(|_| SettingError::ParseIntError(value))?;
+                Ok(Self::BanChannels(value))
             }
-            SK::WelcomeMessage => {
-                if !value.contains("{user_tag}") {
-                    return Err(ParseSettingError::UserTagNotPresent);
-                }
-                Ok(Self::WelcomeMessage(value.to_owned()))
-            }
+            Kind::WelcomeMessage => Ok(Self::WelcomeMessage(value)),
         }
     }
+}
 
+impl fmt::Display for Setting {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Language(lang) => write!(f, "{lang}"),
+            Self::BanChannels(val) => write!(f, "{val}"),
+            Self::WelcomeMessage(msg) => write!(f, "{msg}"),
+        }
+    }
+}
+
+impl Setting {
     pub fn kind(&self) -> SettingKind {
         match self {
             Self::Language(_) => SettingKind::Language,
@@ -118,7 +138,9 @@ pub async fn preload() -> Result<(), sqlx::Error> {
     let mut settings = HashMap::new();
     for (chat_id, kind, value) in rows {
         let kind = SettingKind::from(kind);
-        let setting = Setting::parse(kind, &value).unwrap();
+
+        // Presuming that data in database is always valid, thus `unwrap()` can't fail.
+        let setting = Setting::try_from((kind, value)).unwrap();
         settings
             .entry(ChatId(chat_id))
             .or_insert(HashMap::new())
@@ -142,7 +164,7 @@ ON CONFLICT (chat_id, setting_kind) DO UPDATE SET value = ?3
     )
     .bind(chat_id.0)
     .bind(setting.kind() as i64)
-    .bind(setting.value())
+    .bind(setting.to_string())
     .execute(pool)
     .await?;
 
@@ -151,6 +173,23 @@ ON CONFLICT (chat_id, setting_kind) DO UPDATE SET value = ?3
         .entry(chat_id)
         .or_insert(HashMap::new())
         .insert(setting.kind(), setting);
+
+    Ok(())
+}
+
+pub async fn delete(chat_id: ChatId, kind: SettingKind) -> Result<(), sqlx::Error> {
+    let pool = SQLITE_POOL.get().unwrap();
+    sqlx::query("DELETE FROM settings WHERE chat_id = ?1 AND setting_kind = ?2")
+        .bind(chat_id.0)
+        .bind(kind as i64)
+        .execute(pool)
+        .await?;
+
+    let mut settings = SETTINGS.get().unwrap().lock().unwrap();
+    settings
+        .entry(chat_id)
+        .or_insert(HashMap::new())
+        .remove(&kind);
 
     Ok(())
 }

@@ -7,9 +7,9 @@ Telegram bot with image/emoji CAPTCHA challenge/response.
 ## Features
 
 * Show CAPTCHA for new members.
-* Ban channels [(optional)](#bot-settings).
-* Change bot language per group (only English and Russian supported at the time).
-* Custom Welcome Message.
+* Ban channels except for the linked one (if set) [[optional]](#bot-settings).
+* Change bot language for a group (only English and Russian available at the time).
+* Set custom Welcome Message.
 
 ## Configuration
 
@@ -51,6 +51,7 @@ and `SECRET_TOKEN` is your bot's token with ":" replaced to "_".
 
 ## TODO
 
+* Translate error messages sent to user.
 * Limit number of new chat members per minute, don't show captcha if limit has reached.
 * `/vacuum` command to search and delete all "Deleted Account"s in a group.
 * Periodicly delete expired `ignore` set key/scores in Redis.

@@ -1,9 +1,9 @@
-use crate::settings::ParseSettingError;
+use crate::settings::SettingError;
 use crate::t;
 use fluent_bundle::{
     concurrent::FluentBundle, types::FluentNumber, FluentArgs, FluentResource, FluentValue,
 };
-use std::{collections::HashMap, env, fmt, str::FromStr};
+use std::{borrow::Cow, collections::HashMap, convert::From, env, fmt, str::FromStr};
 use tokio::{fs, sync::OnceCell};
 
 static BUNDLES: OnceCell<HashMap<&Language, FluentBundle<FluentResource>>> = OnceCell::const_new();
@@ -25,14 +25,21 @@ impl fmt::Display for Language {
 }
 
 impl FromStr for Language {
-    type Err = ParseSettingError;
+    type Err = SettingError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "en" => Ok(Self::En),
             "ru" => Ok(Self::Ru),
-            lang => Err(ParseSettingError::UnknownLanguage(lang.to_owned())),
+            lang => Err(SettingError::UnknownLanguage(lang.to_owned())),
         }
+    }
+}
+
+impl From<Language> for FluentValue<'_> {
+    fn from(value: Language) -> Self {
+        let value = Cow::from(value.to_string());
+        FluentValue::String(value)
     }
 }
 
