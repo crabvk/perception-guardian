@@ -10,7 +10,7 @@ mod utils;
 use crate::config::Config;
 use crate::responses::{BanChannelsResponse, LanguageResponse, WelcomeMessageResponse};
 use crate::settings::{BanChannels, Setting, SettingKind};
-use std::{collections::HashMap, future::IntoFuture, sync::Arc, time::Duration};
+use std::{collections::HashMap, future::IntoFuture, time::Duration};
 use strfmt::strfmt;
 use teloxide::{
     adaptors::DefaultParseMode,
@@ -32,6 +32,12 @@ const SETTINGS_BUTTONS: [(&str, &str); 3] = [
 ];
 const LANGUAGES_BUTTONS: [(&str, &str); 2] = [("🇬🇧", "en"), ("🇷🇺", "ru")];
 const BAN_CHANNELS_BUTTONS: [(&str, &str); 2] = [("Yes", "true"), ("No", "false")];
+
+// Temporary const values.
+// TODO: Make those variables as part of bot settings.
+const CAPTCHA_EXPIRE: u64 = 60;
+const MESSAGE_EXPIRE: u64 = 10;
+const EGNORE_EXPIRE: u64 = 300;
 
 type Bot = DefaultParseMode<teloxide::prelude::Bot>;
 type SettingsDialogue = Dialogue<SettingsState, InMemStorage<SettingsState>>;
@@ -70,10 +76,10 @@ enum Command {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     pretty_env_logger::init();
     log::info!("Starting bot...");
-    let config = Config::new().expect("Configuration error");
+    let config = Config::new()?;
 
     // Preload Fluent bundles.
     l10n::load_locales()
@@ -81,7 +87,7 @@ async fn main() {
         .expect("Couldn't preload Fluent bundles");
 
     // Setup Redis connection manager.
-    redis::setup(config.redis_url.clone())
+    redis::setup(config.redis_url)
         .await
         .expect("Couldn't create Redis connection manager");
 
@@ -90,40 +96,38 @@ async fn main() {
         .await
         .expect("Couldn't preload settings");
 
-    let token = &config.telegram.token;
+    let token = &config.token;
     let bot = teloxide::prelude::Bot::new(token).parse_mode(ParseMode::Html);
 
-    if let Some(ref host) = config.telegram.webhook_host {
+    if let Some(ref host) = config.webhook_host {
         log::info!("Receiving updates via webhook on {}", host);
-        let addr = config.telegram.webhook_addr.unwrap();
+        let addr = config.webhook_addr.unwrap();
         let url = format!("https://{host}/webhook").parse().unwrap();
         let opts = webhooks::Options::new(addr, url).secret_token(token.replace(":", "_"));
         let listener = webhooks::axum(bot.clone(), opts)
             .await
             .expect("Couldn't setup webhook");
-        build_dispatcher(bot, schema(), listener, config).await;
+        build_dispatcher(bot, schema(), listener).await;
     } else {
         log::info!("Using long polling to fetch updates");
         let listener = polling_default(bot.clone()).await;
-        build_dispatcher(bot, schema(), listener, config).await;
+        build_dispatcher(bot, schema(), listener).await;
     };
+
+    Ok(())
 }
 
 async fn build_dispatcher<UListener>(
     bot: Bot,
     handler: UpdateHandler<Error>,
     update_listener: UListener,
-    config: Config,
 ) where
     UListener: UpdateListener,
     UListener::Err: core::fmt::Debug,
 {
     let error_handler = LoggingErrorHandler::with_custom_text("An error from the update listener");
     Dispatcher::builder(bot, handler)
-        .dependencies(dptree::deps![
-            InMemStorage::<SettingsState>::new(),
-            Arc::new(config)
-        ])
+        .dependencies(dptree::deps![InMemStorage::<SettingsState>::new()])
         .default_handler(|_upd| async move {
             // log::warn!("Unhandled update: {:?}", upd);
         })
@@ -242,12 +246,7 @@ async fn channel_message_handler(bot: Bot, msg: Message) -> HandlerResult {
     Ok(())
 }
 
-async fn cancel_handler(
-    cfg: Arc<Config>,
-    bot: Bot,
-    msg: Message,
-    dialogue: SettingsDialogue,
-) -> HandlerResult {
+async fn cancel_handler(bot: Bot, msg: Message, dialogue: SettingsDialogue) -> HandlerResult {
     let state = dialogue.get().await?;
 
     if state.is_none() {
@@ -285,7 +284,7 @@ async fn cancel_handler(
                     &bot,
                     chat_id,
                     message.id,
-                    Duration::from_secs(cfg.guardian.message_expire),
+                    Duration::from_secs(MESSAGE_EXPIRE),
                 );
             }
 
@@ -297,7 +296,6 @@ async fn cancel_handler(
 }
 
 async fn input_setting_value_handler(
-    cfg: Arc<Config>,
     bot: Bot,
     msg: Message,
     dialogue: SettingsDialogue,
@@ -341,7 +339,7 @@ async fn input_setting_value_handler(
                 &bot,
                 chat_id,
                 message.id,
-                Duration::from_secs(cfg.guardian.message_expire),
+                Duration::from_secs(MESSAGE_EXPIRE),
             );
             dialogue.exit().await?;
         }
@@ -354,7 +352,6 @@ async fn input_setting_value_handler(
 }
 
 async fn select_setting_value_handler(
-    cfg: Arc<Config>,
     bot: Bot,
     dialogue: SettingsDialogue,
     query: CallbackQuery,
@@ -453,7 +450,7 @@ async fn select_setting_value_handler(
             &bot,
             chat_id,
             message.id,
-            Duration::from_secs(cfg.guardian.message_expire),
+            Duration::from_secs(MESSAGE_EXPIRE),
         );
     }
     dialogue.exit().await?;
@@ -587,7 +584,6 @@ async fn help_command_handler(bot: Bot, msg: Message) -> HandlerResult {
 }
 
 async fn new_chat_members_handler(
-    cfg: Arc<Config>,
     bot: Bot,
     msg: Message,
     chat_members: Vec<User>,
@@ -646,7 +642,7 @@ async fn new_chat_members_handler(
             "captcha-caption",
             lang,
             user_tag = &user_tag,
-            expire = cfg.guardian.captcha_expire
+            expire = CAPTCHA_EXPIRE
         );
         let message = bot
             .send_photo(chat_id, InputFile::url(url))
@@ -657,34 +653,23 @@ async fn new_chat_members_handler(
             "captcha-time-over",
             lang,
             user_tag = user_tag,
-            duration = cfg.guardian.ignore_expire
+            duration = EGNORE_EXPIRE
         );
         let _ = utils::delete_captcha_later(
             &bot,
             chat_id,
             message.id,
             text,
-            Duration::from_secs(cfg.guardian.captcha_expire),
-            Duration::from_secs(cfg.guardian.message_expire),
+            Duration::from_secs(CAPTCHA_EXPIRE),
+            Duration::from_secs(MESSAGE_EXPIRE),
         );
-        redis::set_answer(
-            chat_id,
-            user.id,
-            comb.answer,
-            cfg.guardian.captcha_expire,
-            cfg.guardian.ignore_expire,
-        )
-        .await?;
+        redis::set_answer(chat_id, user.id, comb.answer, CAPTCHA_EXPIRE, EGNORE_EXPIRE).await?;
     }
 
     Ok(())
 }
 
-async fn captcha_response_handler(
-    cfg: Arc<Config>,
-    bot: Bot,
-    query: CallbackQuery,
-) -> HandlerResult {
+async fn captcha_response_handler(bot: Bot, query: CallbackQuery) -> HandlerResult {
     if query.data.is_none() || query.message.is_none() {
         return Ok(());
     }
@@ -736,7 +721,7 @@ async fn captcha_response_handler(
             &bot,
             chat_id,
             message.id,
-            Duration::from_secs(cfg.guardian.message_expire),
+            Duration::from_secs(MESSAGE_EXPIRE),
         );
     } else {
         let text = t!("query-wrong", lang);
@@ -748,14 +733,14 @@ async fn captcha_response_handler(
             "captcha-incorrect-answer",
             lang,
             user_tag = user_tag,
-            duration = cfg.guardian.ignore_expire
+            duration = EGNORE_EXPIRE
         );
         let message = bot.send_message(chat_id, text).await?;
         let _ = utils::delete_message_later(
             &bot,
             chat_id,
             message.id,
-            Duration::from_secs(cfg.guardian.message_expire),
+            Duration::from_secs(MESSAGE_EXPIRE),
         );
     }
 

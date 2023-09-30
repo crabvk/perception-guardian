@@ -13,8 +13,8 @@ Telegram bot with image/emoji CAPTCHA challenge/response.
 
 ## Configuration
 
-Copy [config.example.yaml](config.example.yaml) to *config.yaml*, see comments for config settings descriptions.  
-There're no defaults, all config settings are mandatory.
+This bot loads environment variables from a *.env* file.  
+Copy [.example.env](.example.env) to *.env*, read comments and edit file accordingly.
 
 ## Bot settings
 
@@ -46,14 +46,13 @@ http {
 }
 ```
 
-where `WEBHOOK_ADDR` is the same address:port as in `telegram.webhook_addr` config option,
+where `WEBHOOK_ADDR` is the same `address:port` as `WEBHOOK_ADDR` value in your .env file,
 and `SECRET_TOKEN` is your bot's token with ":" replaced to "_".
 
 ## TODO
 
 * Translate error messages sent to user.
 * Limit number of new chat members per minute, don't show captcha if limit has reached.
-* `/vacuum` command to search and delete all "Deleted Account"s in a group.
 * Periodicly delete expired `ignore` set key/scores in Redis.
 * `/stats` command to show bot statistics: number of users passed/not passed captcha for a group, etc.
 * Add more emojis.

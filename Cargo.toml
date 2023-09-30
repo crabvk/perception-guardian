@@ -16,8 +16,7 @@ log = "0.4"
 pretty_env_logger = "0.5"
 tokio = { version =  "1.32", features = ["rt-multi-thread", "macros"] }
 futures = "0.3"
-config = { version = "0.13", features = ["toml"] }
-serde = { version = "1.0", features = ["derive"] }
+dotenvy = "0.15"
 dptree = "0.3.0"
 url = "2.4"
 rand = "0.8"
@@ -31,3 +30,4 @@ sqlx = { version = "0.7", features = ["runtime-tokio", "tls-rustls", "sqlite"] }
 fluent-bundle = { git = "https://github.com/projectfluent/fluent-rs.git" }
 
 strfmt = "0.2"
+anyhow = "1.0.75"
