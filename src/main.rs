@@ -136,6 +136,7 @@ fn schema() -> UpdateHandler<Error> {
 
     let message_handler = Update::filter_message()
         .branch(Message::filter_new_chat_members().endpoint(new_chat_members_handler))
+        .branch(Message::filter_left_chat_member().endpoint(left_chat_member_handler))
         .branch(command_handler)
         .branch(case![SettingsState::Settings { user_id }].endpoint(input_settings_handler))
         .branch(case![SettingsState::Greeting { user_id }].endpoint(input_greeting_handler))
@@ -173,6 +174,16 @@ async fn is_user_privileged(bot: Bot, upd: Update) -> bool {
     }
 
     false
+}
+
+async fn left_chat_member_handler(bot: Bot, msg: Message) -> HandlerResult {
+    let chat_id = msg.chat.id;
+    let settings = settings::get(chat_id);
+    if settings.delete_entry_messages {
+        bot.delete_message(chat_id, msg.id).await?;
+    }
+
+    Ok(())
 }
 
 async fn channel_message_handler(bot: Bot, msg: Message) -> HandlerResult {
@@ -424,6 +435,11 @@ async fn new_chat_members_handler(
     });
     let restrictions = futures::future::join_all(users_futures).await;
 
+    let settings = settings::get(chat_id);
+    if settings.delete_entry_messages {
+        tokio::spawn(bot.delete_message(chat_id, msg.id).into_future());
+    }
+
     // Show error from the first failed restriction (if any).
     let failed_restrictions: Vec<_> = restrictions.iter().filter(|r| r.is_err()).collect();
     if failed_restrictions.len() > 0 {
@@ -434,7 +450,6 @@ async fn new_chat_members_handler(
         }
     }
 
-    let settings = settings::get(chat_id);
     let bots = chat_members.iter().filter(|m| m.is_bot);
     for b in bots {
         if b.id == me.id {
@@ -467,7 +482,7 @@ async fn new_chat_members_handler(
             "captcha-caption",
             settings.language,
             user_tag = &user_tag,
-            expire = settings.captcha_expire.get()
+            duration = settings.captcha_expire.get()
         );
         let message = bot
             .send_photo(chat_id, InputFile::url(url))
