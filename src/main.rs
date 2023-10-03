@@ -49,7 +49,7 @@ enum Command {
     Settings,
     #[command(description = "change greeting of newcomers")]
     Greeting,
-    #[command(description = "cancel editing a setting")]
+    #[command(description = "cancel changing settings or greeting")]
     Cancel,
 }
 

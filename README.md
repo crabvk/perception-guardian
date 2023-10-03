@@ -18,18 +18,18 @@ Copy [.example.env](.example.env) to *.env*, read comments and edit file accordi
 
 ## Bot settings
 
-In a group use `/showSettings` and `/changeSettings` commands to show and change bot settings.
+In a group use `/settings` commands to show and change bot settings.
 
 List of available settings:
 
-| Setting                 | Description                                                                   | Type             | Possible values |
-| ----------------------- | ----------------------------------------------------------------------------- | ---------------- | --------------- |
-| `language`              | Language the bot speaks                                                       | Enum             | en, ru          |
-| `ban_channels`          | Ban channels of anonymous users[^1]                                           | Boolean          | true, false     |
-| `captcha_expire`        | Captcha will disappear after this timeout (in seconds)                        | Unsigned Integer |                 |
-| `message_expire`        | Expiration timeout (in seconds) for greeting and other<br> temporary messages | Unsigned Integer |                 |
-| `ignore_expire`         | Temporary don't show CAPTCHA again for users who<br>didn't pass it            | Unsigned Integer |                 |
-| `delete_entry_messages` | Whether to delete "User joined/left the group" messages                       | Boolean          | true, false     |
+| Setting                 | Description                                                               | Type             | Possible values |
+| ----------------------- | ------------------------------------------------------------------------- | ---------------- | --------------- |
+| `language`              | Language the bot speaks                                                   | Enum             | en, ru          |
+| `ban_channels`          | Ban channels of anonymous users[^1]                                       | Boolean          | true, false     |
+| `captcha_expire`        | Captcha will disappear after this timeout (in seconds)                    | Unsigned Integer |                 |
+| `message_expire`        | Expiration timeout (in seconds) for greeting and other temporary messages | Unsigned Integer |                 |
+| `ignore_expire`         | Temporary don't show CAPTCHA again for users who didn't pass it           | Unsigned Integer |                 |
+| `delete_entry_messages` | Whether to delete "User joined/left the group" messages                   | Boolean          | true, false     |
 
 [^1]: If a group has linked channel it'll be added as an exception.
 
@@ -67,7 +67,7 @@ and `SECRET_TOKEN` is your bot's token with ":" replaced to "_".
 
 ## TODO
 
-* Translate error messages sent to user.
+* Translate /help output and error messages sent to user.
 * Limit number of new chat members per minute, don't show captcha if limit has reached.
 * Periodicly delete expired `ignore` set key/scores in Redis.
 * `/stats` command to show bot statistics: number of users passed/not passed captcha for a group, etc.

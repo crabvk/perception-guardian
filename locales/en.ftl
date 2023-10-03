@@ -27,7 +27,7 @@ query-wrong-user = Not your keyboard.
 query-correct = Correct!
 query-wrong = Wrong!
 
-make-me-admin = Great! Now make me an <b>admin</b>, so I can restrict newcomers until they pass the captcha 😉
+make-me-admin = Great! Now make me an <b>admin</b>, so I can restrict newcomers until they pass the CAPTCHA 😉
 greeting = { $user_tag } Welcome!
 
 ## Settings related messages.
