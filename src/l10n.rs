@@ -1,9 +1,8 @@
-use crate::settings::SettingError;
 use crate::t;
 use fluent_bundle::{
     concurrent::FluentBundle, types::FluentNumber, FluentArgs, FluentResource, FluentValue,
 };
-use std::{borrow::Cow, collections::HashMap, convert::From, env, fmt, str::FromStr};
+use std::{borrow::Cow, collections::HashMap, convert::From, env, error, fmt, str::FromStr};
 use tokio::{fs, sync::OnceCell};
 
 static BUNDLES: OnceCell<HashMap<&Language, FluentBundle<FluentResource>>> = OnceCell::const_new();
@@ -24,14 +23,25 @@ impl fmt::Display for Language {
     }
 }
 
+#[derive(Debug)]
+pub struct UnknownLanguageError(String);
+
+impl fmt::Display for UnknownLanguageError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "unknown language \"{}\"", self.0)
+    }
+}
+
+impl error::Error for UnknownLanguageError {}
+
 impl FromStr for Language {
-    type Err = SettingError;
+    type Err = UnknownLanguageError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "en" => Ok(Self::En),
             "ru" => Ok(Self::Ru),
-            lang => Err(SettingError::UnknownLanguage(lang.to_owned())),
+            value => Err(UnknownLanguageError(value.into())),
         }
     }
 }

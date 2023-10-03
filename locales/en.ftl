@@ -28,31 +28,19 @@ query-correct = Correct!
 query-wrong = Wrong!
 
 make-me-admin = Great! Now make me an <b>admin</b>, so I can restrict newcomers until they pass the captcha 😉
-welcome = { $user_tag } Welcome!
+greeting = { $user_tag } Welcome!
 
 ## Settings related messages.
 
-settings-select-kind = Choose setting to change:
-settings-select-language = Currently, I'm using English.
-    Choose new language:
-settings-select-language-default = Currently, language is not set and I'm using English as default.
-    Choose new language:
-settings-select-ban-channels-all = Currently, I'm banning all channels.
-    Choose whether to ban channels:
-settings-select-ban-channels-linked = Currently, I'm banning all channels except the linked one ({ $linked_chat_id }).
-    Choose whether to ban channels:
-settings-select-ban-channels-none = Currently, I'm not banning channels.
-    Choose whether to ban channels:
-settings-language-set = Language changed to { $lang ->
-        [ru] Russian
-       *[en] English
-    }.
-settings-ban-channels-set = Now I'll ban all channels.
-settings-ban-channels-linked-set = Now I'll ban all channels except for the linked one ({ $linked_chat_id }).
-settings-ban-channels-none-set = Now I won't ban any channels.
-settings-welcome-message-set = Now I'll use new welcome message:
-    { $welcome_message }
-settings-input-welcome-message = Enter new welcome message:
+settings-changed = Settings changed successfully.
+settings-input = Send me settings in the same format as above:
+    (<a href="https://github.com/crabvk/perception-guardian#bot-settings">Settings description</a>)
+settings-greeting-changed = OK, now I'll use new greeting:
+
+    { $greeting }
+settings-input-greeting = { $greeting }
+
+    Enter new greeting:
     (<a href="https://core.telegram.org/api/entities#allowed-entities">List of allowed HTML tags</a>)
 settings-text-required = Send me some text.
 settings-cancel = Setting editing is canceled.

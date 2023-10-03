@@ -3,41 +3,25 @@ mod l10n;
 mod qna;
 mod qwant;
 mod redis;
-mod responses;
 mod settings;
 mod utils;
 
 use crate::config::Config;
-use crate::responses::{BanChannelsResponse, LanguageResponse, WelcomeMessageResponse};
-use crate::settings::{BanChannels, Setting, SettingKind};
-use std::{collections::HashMap, future::IntoFuture, time::Duration};
+use crate::settings::{BanChannels, RawGreeting, RawSetting};
+use std::{collections::HashMap, future::IntoFuture};
 use strfmt::strfmt;
 use teloxide::{
     adaptors::DefaultParseMode,
     dispatching::{dialogue, dialogue::InMemStorage, UpdateHandler},
     prelude::*,
     types::{
-        ChatKind, ChatPermissions, ChatPublic, InputFile, Me, MessageId, ParseMode, PublicChatKind,
+        ChatKind, ChatPermissions, ChatPublic, InputFile, Me, ParseMode, PublicChatKind,
         PublicChatSupergroup, Update, User, UserId,
     },
     update_listeners::UpdateListener,
     update_listeners::{polling_default, webhooks},
     utils::{command::BotCommands, html},
 };
-
-const SETTINGS_BUTTONS: [(&str, &str); 3] = [
-    ("Language", "0"),
-    ("Ban channels", "1"),
-    ("Welcome message", "2"),
-];
-const LANGUAGES_BUTTONS: [(&str, &str); 2] = [("🇬🇧", "en"), ("🇷🇺", "ru")];
-const BAN_CHANNELS_BUTTONS: [(&str, &str); 2] = [("Yes", "true"), ("No", "false")];
-
-// Temporary const values.
-// TODO: Make those variables as part of bot settings.
-const CAPTCHA_EXPIRE: u64 = 60;
-const MESSAGE_EXPIRE: u64 = 10;
-const EGNORE_EXPIRE: u64 = 300;
 
 type Bot = DefaultParseMode<teloxide::prelude::Bot>;
 type SettingsDialogue = Dialogue<SettingsState, InMemStorage<SettingsState>>;
@@ -48,29 +32,23 @@ type HandlerResult = Result<(), Error>;
 pub enum SettingsState {
     #[default]
     Start,
-    SelectSetting {
+    Settings {
         user_id: UserId,
-        message_id: MessageId,
     },
-    SelectValue {
+    Greeting {
         user_id: UserId,
-        message_id: MessageId,
-        setting_kind: SettingKind,
-    },
-    InputValue {
-        user_id: UserId,
-        message_id: MessageId,
-        setting_kind: SettingKind,
     },
 }
 
 #[derive(BotCommands, Clone)]
-#[command(rename_rule = "lowercase")]
+#[command(rename_rule = "camelCase")]
 enum Command {
     #[command(description = "display this text")]
     Help,
     #[command(description = "change bot settings")]
     Settings,
+    #[command(description = "change greeting of newcomers")]
+    Greeting,
     #[command(description = "cancel editing a setting")]
     Cancel,
 }
@@ -150,43 +128,23 @@ fn schema() -> UpdateHandler<Error> {
             case![SettingsState::Start]
                 .branch(case![Command::Settings].endpoint(settings_command_handler)),
         )
+        .branch(
+            case![SettingsState::Start]
+                .branch(case![Command::Greeting].endpoint(greeting_command_handler)),
+        )
         .branch(case![Command::Cancel].endpoint(cancel_handler));
 
     let message_handler = Update::filter_message()
         .branch(Message::filter_new_chat_members().endpoint(new_chat_members_handler))
         .branch(command_handler)
-        .branch(
-            case![SettingsState::InputValue {
-                user_id,
-                message_id,
-                setting_kind
-            }]
-            .endpoint(input_setting_value_handler),
-        )
+        .branch(case![SettingsState::Settings { user_id }].endpoint(input_settings_handler))
+        .branch(case![SettingsState::Greeting { user_id }].endpoint(input_greeting_handler))
         .filter(is_channel_message)
         .endpoint(channel_message_handler);
-
-    let callback_settings_handler = Update::filter_callback_query()
-        .branch(
-            case![SettingsState::SelectSetting {
-                user_id,
-                message_id
-            }]
-            .endpoint(select_setting_kind_handler),
-        )
-        .branch(
-            case![SettingsState::SelectValue {
-                user_id,
-                message_id,
-                setting_kind
-            }]
-            .endpoint(select_setting_value_handler),
-        );
 
     dialogue::enter::<Update, InMemStorage<SettingsState>, SettingsState, _>()
         .filter(is_group_or_supergroup)
         .branch(message_handler)
-        .branch(callback_settings_handler)
         .branch(Update::filter_callback_query().endpoint(captcha_response_handler))
 }
 
@@ -219,7 +177,7 @@ async fn is_user_privileged(bot: Bot, upd: Update) -> bool {
 
 async fn channel_message_handler(bot: Bot, msg: Message) -> HandlerResult {
     let chat_id = msg.chat.id;
-    let ban_channels = settings::get(chat_id, SettingKind::BanChannels);
+    let ban_channels = settings::get_ban_channels(chat_id);
 
     if ban_channels.is_none() {
         return Ok(());
@@ -227,8 +185,7 @@ async fn channel_message_handler(bot: Bot, msg: Message) -> HandlerResult {
 
     // `sender_chat()` is `Some(_)` because of `is_channel_message` filter in `schema()`.
     let sender_chat = msg.sender_chat().unwrap();
-    let linked_chat_id = if let Setting::BanChannels(BanChannels::AllExceptLinked(linked_chat_id)) =
-        ban_channels.unwrap()
+    let linked_chat_id = if let BanChannels::AllExceptLinked(linked_chat_id) = ban_channels.unwrap()
     {
         linked_chat_id
     } else {
@@ -246,308 +203,100 @@ async fn channel_message_handler(bot: Bot, msg: Message) -> HandlerResult {
     Ok(())
 }
 
-async fn cancel_handler(bot: Bot, msg: Message, dialogue: SettingsDialogue) -> HandlerResult {
-    let state = dialogue.get().await?;
-
-    if state.is_none() {
-        return Ok(());
-    }
-
-    if let Some(
-        SettingsState::SelectSetting {
-            user_id,
-            message_id,
-        }
-        | SettingsState::SelectValue {
-            user_id,
-            message_id,
-            ..
-        }
-        | SettingsState::InputValue {
-            user_id,
-            message_id,
-            ..
-        },
-    ) = state
-    {
-        if user_id == msg.from().unwrap().id {
-            let chat_id = msg.chat.id;
-            let lang = settings::lang(chat_id);
-            let text = t!("settings-cancel", lang);
-            let (message, _) = tokio::join!(
-                bot.send_message(chat_id, text).into_future(),
-                bot.delete_message(chat_id, message_id).into_future()
-            );
-
-            if let Ok(message) = message {
-                let _ = utils::delete_message_later(
-                    &bot,
-                    chat_id,
-                    message.id,
-                    Duration::from_secs(MESSAGE_EXPIRE),
-                );
-            }
-
-            dialogue.exit().await?;
-        }
-    }
-
-    Ok(())
-}
-
-async fn input_setting_value_handler(
+async fn input_settings_handler(
     bot: Bot,
     msg: Message,
     dialogue: SettingsDialogue,
-    (user_id, _, _): (UserId, MessageId, SettingKind),
+    user_id: UserId,
 ) -> HandlerResult {
     if user_id != msg.from().unwrap().id {
         return Ok(());
     }
 
     let chat_id = msg.chat.id;
-    let lang = settings::lang(chat_id);
     let text = msg.text();
+    let mut settings = settings::get(chat_id);
 
     if text.is_none() {
-        let text = t!("settings-text-required", lang);
+        let text = t!("settings-text-required", settings.language);
         bot.send_message(chat_id, text).await?;
         return Ok(());
     }
 
-    let response: Result<WelcomeMessageResponse, _> = text.unwrap().parse();
+    let raw_settings = RawSetting::from_str(text.unwrap());
 
-    if let Err(error) = response {
-        let text = format!("Couldn't parse <b>WelcomeMessage</b> value: {error}");
-        bot.send_message(chat_id, text).await?;
-        return Ok(());
-    }
-
-    let welcome_message = response.unwrap().0;
-    let text = t!(
-        "settings-welcome-message-set",
-        lang,
-        welcome_message = &welcome_message
-    );
-    let setting = Setting::WelcomeMessage(welcome_message);
-
-    // Send welcome message back to check its validity.
-    match bot.send_message(chat_id, text).await {
-        Ok(message) => {
-            settings::set(chat_id, setting).await?;
-            let _ = utils::delete_message_later(
-                &bot,
-                chat_id,
-                message.id,
-                Duration::from_secs(MESSAGE_EXPIRE),
-            );
-            dialogue.exit().await?;
-        }
-        Err(error) => {
-            bot.send_message(chat_id, error.to_string()).await?;
-        }
-    }
-
-    Ok(())
-}
-
-async fn select_setting_value_handler(
-    bot: Bot,
-    dialogue: SettingsDialogue,
-    query: CallbackQuery,
-    upd: Update,
-    (user_id, message_id, setting_kind): (UserId, MessageId, SettingKind),
-) -> HandlerResult {
-    if query.data.is_none() {
-        return Ok(());
-    }
-
-    let chat_id = dialogue.chat_id();
-    let lang = settings::lang(chat_id);
-    let message = query.message;
-
-    if message.is_none() || message_id != message.as_ref().unwrap().id {
-        let text = t!("settings-message-outdated", lang);
-        bot.answer_callback_query(query.id).text(text).await?;
-        return Ok(());
-    }
-
-    if user_id != upd.user().unwrap().id {
-        let text = t!("query-wrong-user", lang);
-        bot.answer_callback_query(query.id).text(text).await?;
-        return Ok(());
-    }
-
-    bot.answer_callback_query(query.id).await?;
-    let value = query.data.unwrap();
-
-    let send_message = match setting_kind {
-        SettingKind::Language => {
-            let response: Result<LanguageResponse, _> = value.parse();
-
-            if let Err(error) = response {
-                let text = format!("Couldn't parse <b>Language</b> value: {error}");
-                bot.send_message(chat_id, text).await?;
-                return Ok(());
-            }
-
-            let lang = response.unwrap().0;
-            let setting = Setting::Language(lang);
-            settings::set(chat_id, setting).await?;
-            let text = t!("settings-language-set", lang, lang);
-            bot.send_message(chat_id, text)
-        }
-        SettingKind::BanChannels => {
-            let response: Result<BanChannelsResponse, _> = value.parse();
-
-            if let Err(error) = response {
-                let text = format!("Couldn't parse <b>BanChannels</b> value: {error}");
-                bot.send_message(chat_id, text).await?;
-                return Ok(());
-            }
-
-            if response.unwrap().0 {
-                let chat = bot.get_chat(chat_id).await?;
-
-                if let ChatKind::Public(ChatPublic {
-                    kind:
-                        PublicChatKind::Supergroup(PublicChatSupergroup {
-                            linked_chat_id: Some(linked_chat_id),
-                            ..
-                        }),
-                    ..
-                }) = chat.kind
-                {
-                    let setting =
-                        Setting::BanChannels(BanChannels::AllExceptLinked(linked_chat_id));
-                    settings::set(chat_id, setting).await?;
-                    let text = t!("settings-ban-channels-linked-set", lang, linked_chat_id);
-                    bot.send_message(chat_id, text)
-                } else {
-                    let setting = Setting::BanChannels(BanChannels::All);
-                    settings::set(chat_id, setting).await?;
-                    let text = t!("settings-ban-channels-set", lang);
-                    bot.send_message(chat_id, text)
-                }
-            } else {
-                let ban_channels = settings::get(chat_id, SettingKind::BanChannels);
-                if ban_channels.is_some() {
-                    settings::delete(chat_id, SettingKind::BanChannels).await?;
-                }
-                let text = t!("settings-ban-channels-none-set", lang);
-                bot.send_message(chat_id, text)
-            }
-        }
-        _ => unreachable!(),
-    };
-
-    let (message, _) = tokio::join!(
-        send_message.into_future(),
-        bot.delete_message(chat_id, message_id).into_future()
-    );
-    if let Ok(message) = message {
-        let _ = utils::delete_message_later(
-            &bot,
+    if let Err(error) = raw_settings {
+        bot.send_message(
             chat_id,
-            message.id,
-            Duration::from_secs(MESSAGE_EXPIRE),
-        );
+            format!("Parsing error: {error}.\nTry again or /cancel"),
+        )
+        .await?;
+        return Ok(());
     }
+
+    for raw_setting in raw_settings.unwrap() {
+        match raw_setting {
+            RawSetting::Language(lang) => settings.language = lang,
+            RawSetting::BanChannels(val) => {
+                let val = if val {
+                    let chat = bot.get_chat(chat_id).await?;
+
+                    if let ChatKind::Public(ChatPublic {
+                        kind:
+                            PublicChatKind::Supergroup(PublicChatSupergroup {
+                                linked_chat_id: Some(linked_chat_id),
+                                ..
+                            }),
+                        ..
+                    }) = chat.kind
+                    {
+                        Some(BanChannels::AllExceptLinked(linked_chat_id))
+                    } else {
+                        Some(BanChannels::All)
+                    }
+                } else {
+                    None
+                };
+                settings.ban_channels = val;
+            }
+            RawSetting::CaptchaExpire(val) => settings.captcha_expire = val,
+            RawSetting::MessageExpire(val) => settings.message_expire = val,
+            RawSetting::IgnoreExpire(val) => settings.ignore_expire = val,
+            RawSetting::DeleteEntryMessages(val) => settings.delete_entry_messages = val,
+        }
+    }
+
+    let lang = settings.language;
+    let message_expire = settings.message_expire();
+    settings::set(chat_id, settings).await?;
+    let text = t!("settings-changed", lang);
+    let message = bot.send_message(chat_id, text).await?;
+    let _ = utils::delete_message_later(&bot, chat_id, message.id, message_expire);
     dialogue.exit().await?;
+
     Ok(())
 }
 
-async fn select_setting_kind_handler(
+async fn greeting_command_handler(
     bot: Bot,
+    msg: Message,
     dialogue: SettingsDialogue,
-    query: CallbackQuery,
-    upd: Update,
-    (user_id, message_id): (UserId, MessageId),
 ) -> HandlerResult {
-    if query.data.is_none() {
-        return Ok(());
-    }
-
-    let chat_id = dialogue.chat_id();
+    let chat_id = msg.chat.id;
     let lang = settings::lang(chat_id);
-    let message = query.message;
+    let greeting =
+        settings::get_greeting(chat_id).unwrap_or(t!("greeting", lang, user_tag = "{user_tag}"));
+    let text = t!("settings-input-greeting", lang, greeting);
 
-    if message.is_none() || message_id != message.as_ref().unwrap().id {
-        let text = t!("settings-message-outdated", lang);
-        bot.answer_callback_query(query.id).text(text).await?;
-        return Ok(());
-    }
-
-    if user_id != upd.user().unwrap().id {
-        let text = t!("query-wrong-user", lang);
-        bot.answer_callback_query(query.id).text(text).await?;
-        return Ok(());
-    }
-
-    bot.answer_callback_query(query.id).await?;
-    bot.delete_message(chat_id, message.unwrap().id).await?;
-    let setting_kind = query.data.unwrap().parse::<i64>();
-
-    if let Err(error) = setting_kind {
-        let text = format!("Couldn't parse callback query data: {error}");
-        bot.send_message(chat_id, text).await?;
-        return Ok(());
-    }
-
-    let setting_kind = SettingKind::from(setting_kind.unwrap());
-    let user_id = query.from.id;
-    match setting_kind {
-        SettingKind::Language | SettingKind::BanChannels => {
-            let setting = settings::get(chat_id, setting_kind);
-            let (keyboard, text) = if setting_kind == SettingKind::Language {
-                let text = if let Some(Setting::Language(lang)) = setting {
-                    t!("settings-select-language", lang)
-                } else {
-                    t!("settings-select-language-default", lang)
-                };
-                (utils::keyboard(&LANGUAGES_BUTTONS, 2), text)
-            } else if setting_kind == SettingKind::BanChannels {
-                let text = match setting {
-                    Some(Setting::BanChannels(BanChannels::All)) => {
-                        t!("settings-select-ban-channels-all", lang)
-                    }
-                    Some(Setting::BanChannels(BanChannels::AllExceptLinked(linked_chat_id))) => {
-                        t!("settings-select-ban-channels-linked", lang, linked_chat_id)
-                    }
-                    None => t!("settings-select-ban-channels-none", lang),
-                    _ => unreachable!(),
-                };
-                (utils::keyboard(&BAN_CHANNELS_BUTTONS, 2), text)
-            } else {
-                unreachable!()
-            };
-            let message = bot
-                .send_message(chat_id, text)
-                .reply_markup(keyboard)
-                .await?;
-            dialogue
-                .update(SettingsState::SelectValue {
-                    user_id,
-                    setting_kind,
-                    message_id: message.id,
-                })
-                .await?;
-        }
-        SettingKind::WelcomeMessage => {
-            let text = t!("settings-input-welcome-message", lang);
-            let message = bot
-                .send_message(chat_id, text)
-                .disable_web_page_preview(true)
-                .await?;
-            dialogue
-                .update(SettingsState::InputValue {
-                    user_id,
-                    setting_kind,
-                    message_id: message.id,
-                })
-                .await?;
-        }
-    }
+    bot.send_message(chat_id, text)
+        .reply_to_message_id(msg.id)
+        .disable_web_page_preview(true)
+        .await?;
+    dialogue
+        .update(SettingsState::Greeting {
+            user_id: msg.from().unwrap().id,
+        })
+        .await?;
 
     Ok(())
 }
@@ -558,20 +307,96 @@ async fn settings_command_handler(
     dialogue: SettingsDialogue,
 ) -> HandlerResult {
     let chat_id = msg.chat.id;
-    let lang = settings::lang(chat_id);
-    let text = t!("settings-select-kind", lang);
-    let keyboard = utils::keyboard(&SETTINGS_BUTTONS, 2);
-    let message = bot
-        .send_message(chat_id, text)
-        .reply_markup(keyboard)
+    let settings = settings::get(chat_id);
+    let text = RawSetting::to_string(&settings);
+
+    bot.send_message(chat_id, text)
         .reply_to_message_id(msg.id)
         .await?;
+
+    let text = t!("settings-input", settings.language);
+    bot.send_message(chat_id, text)
+        .disable_web_page_preview(true)
+        .await?;
     dialogue
-        .update(SettingsState::SelectSetting {
+        .update(SettingsState::Settings {
             user_id: msg.from().unwrap().id,
-            message_id: message.id,
         })
         .await?;
+
+    Ok(())
+}
+
+async fn cancel_handler(bot: Bot, msg: Message, dialogue: SettingsDialogue) -> HandlerResult {
+    let state = dialogue.get().await?;
+
+    if state.is_none() {
+        return Ok(());
+    }
+
+    if let Some(SettingsState::Settings { user_id } | SettingsState::Greeting { user_id }) = state {
+        if user_id == msg.from().unwrap().id {
+            let chat_id = msg.chat.id;
+            let settings = settings::get(chat_id);
+            let text = t!("settings-cancel", settings.language);
+            let message = bot.send_message(chat_id, text).await?;
+            let _ =
+                utils::delete_message_later(&bot, chat_id, message.id, settings.message_expire());
+
+            dialogue.exit().await?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn input_greeting_handler(
+    bot: Bot,
+    msg: Message,
+    dialogue: SettingsDialogue,
+    user_id: UserId,
+) -> HandlerResult {
+    if user_id != msg.from().unwrap().id {
+        return Ok(());
+    }
+
+    let chat_id = msg.chat.id;
+    let settings = settings::get(chat_id);
+    let text = msg.text();
+
+    if text.is_none() {
+        let text = t!("settings-text-required", settings.language);
+        bot.send_message(chat_id, text).await?;
+        return Ok(());
+    }
+
+    let raw_greeting: Result<RawGreeting, _> = text.unwrap().parse();
+
+    if let Err(error) = raw_greeting {
+        let text = format!("Error parsing greeting: {error}.\nTry again or /cancel");
+        bot.send_message(chat_id, text).await?;
+        return Ok(());
+    }
+
+    let greeting = raw_greeting.unwrap().0;
+    let text = t!(
+        "settings-greeting-changed",
+        settings.language,
+        greeting = &greeting
+    );
+
+    // Send greeting back to check its validity.
+    match bot.send_message(chat_id, text).await {
+        Ok(message) => {
+            settings::set_greeting(chat_id, greeting).await?;
+            let _ =
+                utils::delete_message_later(&bot, chat_id, message.id, settings.message_expire());
+            dialogue.exit().await?;
+        }
+        Err(error) => {
+            bot.send_message(chat_id, error.to_string()).await?;
+        }
+    }
 
     Ok(())
 }
@@ -590,7 +415,6 @@ async fn new_chat_members_handler(
     me: Me,
 ) -> HandlerResult {
     let chat_id = msg.chat.id;
-    let lang = settings::lang(chat_id);
     let users = chat_members.iter().filter(|m| !m.is_bot);
 
     // Restrict new users as soon as possible.
@@ -604,16 +428,17 @@ async fn new_chat_members_handler(
     let failed_restrictions: Vec<_> = restrictions.iter().filter(|r| r.is_err()).collect();
     if failed_restrictions.len() > 0 {
         if let Err(error) = failed_restrictions[0] {
-            let message = format!("Couldn't restrict user: {error}");
+            let message = format!("Failed to restrict user: {error}");
             log::error!("{message}");
             bot.send_message(chat_id, message).await?;
         }
     }
 
+    let settings = settings::get(chat_id);
     let bots = chat_members.iter().filter(|m| m.is_bot);
     for b in bots {
         if b.id == me.id {
-            let text = t!("make-me-admin", lang);
+            let text = t!("make-me-admin", settings.language);
             bot.send_message(chat_id, text).await?;
         }
         log::info!(
@@ -640,9 +465,9 @@ async fn new_chat_members_handler(
         let keyboard = utils::emojis_keyboard(&comb.emojis, 2);
         let caption = t!(
             "captcha-caption",
-            lang,
+            settings.language,
             user_tag = &user_tag,
-            expire = CAPTCHA_EXPIRE
+            expire = settings.captcha_expire.get()
         );
         let message = bot
             .send_photo(chat_id, InputFile::url(url))
@@ -651,19 +476,26 @@ async fn new_chat_members_handler(
             .await?;
         let text = t!(
             "captcha-time-over",
-            lang,
+            settings.language,
             user_tag = user_tag,
-            duration = EGNORE_EXPIRE
+            duration = settings.ignore_expire.get()
         );
         let _ = utils::delete_captcha_later(
             &bot,
             chat_id,
             message.id,
             text,
-            Duration::from_secs(CAPTCHA_EXPIRE),
-            Duration::from_secs(MESSAGE_EXPIRE),
+            settings.captcha_expire(),
+            settings.message_expire(),
         );
-        redis::set_answer(chat_id, user.id, comb.answer, CAPTCHA_EXPIRE, EGNORE_EXPIRE).await?;
+        redis::set_answer(
+            chat_id,
+            user.id,
+            comb.answer,
+            settings.captcha_expire.get(),
+            settings.ignore_expire.get(),
+        )
+        .await?;
     }
 
     Ok(())
@@ -678,11 +510,11 @@ async fn captcha_response_handler(bot: Bot, query: CallbackQuery) -> HandlerResu
     let message = query.message.unwrap();
     let chat_id = message.chat.id;
     let user_id = query.from.id;
-    let lang = settings::lang(chat_id);
+    let settings = settings::get(chat_id);
     let correct_answer = redis::get_answer(chat_id, user_id).await?;
 
     if correct_answer.is_none() {
-        let text = t!("query-wrong-user", lang);
+        let text = t!("query-wrong-user", settings.language);
         bot.answer_callback_query(query.id).text(text).await?;
         return Ok(());
     }
@@ -691,7 +523,7 @@ async fn captcha_response_handler(bot: Bot, query: CallbackQuery) -> HandlerResu
     let user_tag = html::user_mention_or_link(&query.from);
 
     if *answer == correct_answer {
-        let text = t!("query-correct", lang);
+        let text = t!("query-correct", settings.language);
         let (restriction, _, _) = tokio::join!(
             bot.restrict_chat_member(chat_id, user_id, ChatPermissions::all())
                 .into_future(),
@@ -701,47 +533,35 @@ async fn captcha_response_handler(bot: Bot, query: CallbackQuery) -> HandlerResu
 
         // Show error if restriction didn't work.
         if let Err(error) = restriction {
-            let message = format!("Couldn't restrict user: {error}");
+            let message = format!("Failed to restrict user: {error}");
             log::error!("{message}");
             bot.send_message(chat_id, message).await?;
             return Ok(());
         }
 
-        let text = if let Some(Setting::WelcomeMessage(text)) =
-            settings::get(chat_id, SettingKind::WelcomeMessage)
-        {
+        let text = if let Some(text) = settings::get_greeting(chat_id) {
             let mut vars = HashMap::new();
             vars.insert("user_tag".to_string(), user_tag);
             strfmt(&text, &vars).unwrap()
         } else {
-            t!("welcome", lang, user_tag)
+            t!("greeting", settings.language, user_tag)
         };
         let message = bot.send_message(chat_id, text).await?;
-        let _ = utils::delete_message_later(
-            &bot,
-            chat_id,
-            message.id,
-            Duration::from_secs(MESSAGE_EXPIRE),
-        );
+        let _ = utils::delete_message_later(&bot, chat_id, message.id, settings.message_expire());
     } else {
-        let text = t!("query-wrong", lang);
+        let text = t!("query-wrong", settings.language);
         let _ = tokio::join!(
             bot.answer_callback_query(query.id).text(text).into_future(),
             bot.delete_message(chat_id, message.id).into_future()
         );
         let text = t!(
             "captcha-incorrect-answer",
-            lang,
+            settings.language,
             user_tag = user_tag,
-            duration = EGNORE_EXPIRE
+            duration = settings.ignore_expire.get()
         );
         let message = bot.send_message(chat_id, text).await?;
-        let _ = utils::delete_message_later(
-            &bot,
-            chat_id,
-            message.id,
-            Duration::from_secs(MESSAGE_EXPIRE),
-        );
+        let _ = utils::delete_message_later(&bot, chat_id, message.id, settings.message_expire());
     }
 
     Ok(())

@@ -1,6 +1,9 @@
-CREATE TABLE IF NOT EXISTS settings (
-    chat_id INTEGER NOT NULL,
-    setting_kind INTEGER NOT NULL,
-    value TEXT NOT NULL,
-    PRIMARY KEY (chat_id, setting_kind)
+CREATE TABLE settings (
+    chat_id INTEGER PRIMARY KEY,
+    language TEXT NOT NULL,
+    ban_channels INTEGER,
+    captcha_expire INTEGER NOT NULL,
+    message_expire INTEGER NOT NULL,
+    ignore_expire INTEGER NOT NULL,
+    delete_entry_messages BOOLEAN NOT NULL
 );

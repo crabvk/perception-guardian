@@ -9,7 +9,7 @@ Telegram bot with image/emoji CAPTCHA challenge/response.
 * Show CAPTCHA for new members.
 * Ban channels except for the linked one (if set) [[optional]](#bot-settings).
 * Change bot language for a group (only English and Russian available at the time).
-* Set custom Welcome Message.
+* Set custom greeting.
 
 ## Configuration
 
@@ -18,7 +18,23 @@ Copy [.example.env](.example.env) to *.env*, read comments and edit file accordi
 
 ## Bot settings
 
-Use `/settings` command to change bot settings for a group.
+In a group use `/showSettings` and `/changeSettings` commands to show and change bot settings.
+
+List of available settings:
+
+| Setting                 | Description                                                                   | Type             | Possible values |
+| ----------------------- | ----------------------------------------------------------------------------- | ---------------- | --------------- |
+| `language`              | Language the bot speaks                                                       | Enum             | en, ru          |
+| `ban_channels`          | Ban channels of anonymous users[^1]                                           | Boolean          | true, false     |
+| `captcha_expire`        | Captcha will disappear after this timeout (in seconds)                        | Unsigned Integer |                 |
+| `message_expire`        | Expiration timeout (in seconds) for greeting and other<br> temporary messages | Unsigned Integer |                 |
+| `ignore_expire`         | Temporary don't show CAPTCHA again for users who<br>didn't pass it            | Unsigned Integer |                 |
+| `delete_entry_messages` | Whether to delete "User joined/left the group" messages                       | Boolean          | true, false     |
+
+[^1]: If a group has linked channel it'll be added as an exception.
+
+Use `/greeting` command to change greeting for newcomers.  
+Note that greeting text must include "{user_tag}" substring.
 
 ## Webhook setup with Nginx
 

@@ -21,22 +21,6 @@ pub fn emojis_keyboard(emojis: &[&str], rows: usize) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(keyboard)
 }
 
-pub fn keyboard(pairs: &[(&str, &str)], row_size: usize) -> InlineKeyboardMarkup {
-    let rows = (pairs.len() as f64 / row_size as f64).ceil() as usize;
-    let mut keyboard: Vec<Vec<InlineKeyboardButton>> = Vec::with_capacity(rows);
-
-    for row in pairs.chunks(row_size) {
-        let kb_row = row
-            .iter()
-            .map(|(title, idx)| InlineKeyboardButton::callback(title.to_owned(), idx.to_string()))
-            .collect();
-
-        keyboard.push(kb_row);
-    }
-
-    InlineKeyboardMarkup::new(keyboard)
-}
-
 pub fn delete_message_later(
     bot: &crate::Bot,
     chat_id: ChatId,
