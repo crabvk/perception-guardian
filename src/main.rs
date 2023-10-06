@@ -25,8 +25,7 @@ use teloxide::{
 
 type Bot = DefaultParseMode<teloxide::prelude::Bot>;
 type SettingsDialogue = Dialogue<SettingsState, InMemStorage<SettingsState>>;
-type Error = Box<dyn std::error::Error + Send + Sync>;
-type HandlerResult = Result<(), Error>;
+type HandlerResult = Result<(), anyhow::Error>;
 
 #[derive(Default, Clone)]
 pub enum SettingsState {
@@ -97,7 +96,7 @@ async fn main() -> anyhow::Result<()> {
 
 async fn build_dispatcher<UListener>(
     bot: Bot,
-    handler: UpdateHandler<Error>,
+    handler: UpdateHandler<anyhow::Error>,
     update_listener: UListener,
 ) where
     UListener: UpdateListener,
@@ -118,7 +117,7 @@ async fn build_dispatcher<UListener>(
         .await;
 }
 
-fn schema() -> UpdateHandler<Error> {
+fn schema() -> UpdateHandler<anyhow::Error> {
     use dptree::case;
 
     let command_handler = teloxide::filter_command::<Command, _>()

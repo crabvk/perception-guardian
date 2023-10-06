@@ -76,6 +76,13 @@ pub enum RawSetting {
     DeleteEntryMessages(bool),
 }
 
+fn raw_setting_error<E>(error: E) -> RawSettingError
+where
+    E: error::Error + Send + Sync + 'static,
+{
+    RawSettingError::InvalidValue(error.into())
+}
+
 impl RawSetting {
     pub fn from_str(s: &str) -> Result<HashSet<RawSetting>, RawSettingError> {
         let mut settings = HashSet::new();
@@ -95,39 +102,27 @@ impl RawSetting {
 
             match key {
                 "language" => {
-                    let value = value
-                        .parse::<Language>()
-                        .map_err(|error| RawSettingError::InvalidValue(error.into()))?;
+                    let value = value.parse::<Language>().map_err(raw_setting_error)?;
                     settings.insert(RawSetting::Language(value));
                 }
                 "ban_channels" => {
-                    let value = value
-                        .parse::<bool>()
-                        .map_err(|error| RawSettingError::InvalidValue(error.into()))?;
+                    let value = value.parse::<bool>().map_err(raw_setting_error)?;
                     settings.insert(RawSetting::BanChannels(value));
                 }
                 "captcha_expire" => {
-                    let value = value
-                        .parse::<NonZeroU64>()
-                        .map_err(|error| RawSettingError::InvalidValue(error.into()))?;
+                    let value = value.parse::<NonZeroU64>().map_err(raw_setting_error)?;
                     settings.insert(RawSetting::CaptchaExpire(value));
                 }
                 "message_expire" => {
-                    let value = value
-                        .parse::<NonZeroU64>()
-                        .map_err(|error| RawSettingError::InvalidValue(error.into()))?;
+                    let value = value.parse::<NonZeroU64>().map_err(raw_setting_error)?;
                     settings.insert(RawSetting::MessageExpire(value));
                 }
                 "ignore_expire" => {
-                    let value = value
-                        .parse::<NonZeroU64>()
-                        .map_err(|error| RawSettingError::InvalidValue(error.into()))?;
+                    let value = value.parse::<NonZeroU64>().map_err(raw_setting_error)?;
                     settings.insert(RawSetting::IgnoreExpire(value));
                 }
                 "delete_entry_messages" => {
-                    let value = value
-                        .parse::<bool>()
-                        .map_err(|error| RawSettingError::InvalidValue(error.into()))?;
+                    let value = value.parse::<bool>().map_err(raw_setting_error)?;
                     settings.insert(RawSetting::DeleteEntryMessages(value));
                 }
                 _ => return Err(RawSettingError::UnknownSetting(key.into())),

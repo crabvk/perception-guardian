@@ -59,7 +59,7 @@ impl Language {
     }
 }
 
-pub async fn load_locales() -> Result<(), crate::Error> {
+pub async fn load_locales() -> Result<(), anyhow::Error> {
     let mut bundles = HashMap::new();
 
     for lang in Language::values() {

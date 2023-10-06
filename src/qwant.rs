@@ -25,7 +25,7 @@ impl fmt::Display for QwantResponseError {
 
 impl std::error::Error for QwantResponseError {}
 
-pub async fn get_image_url(query: &str) -> Result<Url, crate::Error> {
+pub async fn get_image_url(query: &str) -> Result<Url, anyhow::Error> {
     log::info!("Searching images on Qwant with query: \"{query}\"");
     let mut url = Url::parse_with_params(SEARCH_URL, PARAMS).unwrap();
     url.query_pairs_mut().append_pair("q", query);
