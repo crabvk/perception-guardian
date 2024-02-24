@@ -10,7 +10,7 @@ static REDIS: OnceCell<ConnectionManager> = OnceCell::const_new();
 pub async fn setup(url: url::Url) -> RedisResult<()> {
     let cm = ::redis::Client::open(url)
         .unwrap()
-        .get_tokio_connection_manager()
+        .get_connection_manager()
         .await?;
 
     if REDIS.set(cm).is_err() {
@@ -39,7 +39,7 @@ pub async fn set_answer(
     redis::pipe()
         .atomic()
         .set(&key, answer)
-        .expire(&key, captcha_expire as usize)
+        .expire(&key, captcha_expire as i64)
         .zadd(IGNORE_KEY, member, epoch)
         .query_async(&mut cm)
         .await?;

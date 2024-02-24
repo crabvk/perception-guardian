@@ -69,7 +69,7 @@ enum Group {
 }
 
 #[rustfmt::skip]
-const GROUPS: [Group; 110] = [
+const GROUPS: [Group; 109] = [
     Single(Query(&["😎", "🕶"], &["people in sunglasses", "sunglasses"])),
     Single(Query(&["🥳", "🎉", "🎊"], &["birthday party children", "people on a party"])),
     Single(Query(&["😤", "😠", "😡"], &["angry man", "angry woman"])),
@@ -151,7 +151,6 @@ const GROUPS: [Group; 110] = [
         Query(&["🐍"], &["snake"]),
         Query(&["🪱"], &["worm"]),
     ]),
-    Single(Query(&["🦕", "🦖"], &["dinosaur"])),
     Multiple(&[
         Query(&["🦖"], &["dinosaur T-Rex"]),
         Query(&["🦕"], &["dinosaur sauropod"]),
